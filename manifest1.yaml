@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  replicas: 1  #минимальное количество подов
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: #для плавных обновдений
+      maxUnavailable: 1  #не более одного недоступного пода во время обновления
+      maxSurge: 1  #добавлять один новый под за раз
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      topologySpreadConstraints: #размещаем поды в разных зонах
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: my-app
+      containers:
+        - name: my-app
+          image: my-app:latest
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 0.2  #учёт скачка CPU при старте
+              memory: 128Mi
+            limits:
+              cpu: 1  #ограничение максимального потребления
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 5  #учитываем время инициализации
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      terminationGracePeriodSeconds: 15  #время на завершение работы при удалении пода, для корректного завершения при удалении подов
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: my-app-hpa
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: my-app
+  minReplicas: 1  #ночью
+  maxReplicas: 4  #днем
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 50  # Масштабируемость на основе CPU
